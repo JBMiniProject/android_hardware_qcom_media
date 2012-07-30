@@ -36,6 +36,9 @@ endif
 ifeq ($(TARGET_BOARD_PLATFORM),msm7627a)
 libmm-venc-def += -DMAX_RES_720P
 endif
+ifeq ($(TARGET_BOARD_PLATFORM),msm7x30)
+libmm-venc-def += -DMAX_RES_720P
+endif
 ifeq ($(TARGET_USES_ION),true)
 libmm-venc-def += -DUSE_ION
 endif
@@ -48,7 +51,7 @@ include $(CLEAR_VARS)
 
 libmm-venc-inc      := bionic/libc/include
 libmm-venc-inc      += bionic/libstdc++/include
-libmm-venc-inc      := $(LOCAL_PATH)/inc
+libmm-venc-inc      += $(LOCAL_PATH)/inc
 libmm-venc-inc      += $(OMX_VIDEO_PATH)/vidc/common/inc
 libmm-venc-inc      += hardware/qcom/media/mm-core/inc
 #libmm-venc-inc      += bionic/libc/kernel/common/linux
@@ -69,7 +72,7 @@ LOCAL_SHARED_LIBRARIES    := liblog libutils libbinder libcutils
 LOCAL_SRC_FILES   := src/omx_video_base.cpp
 LOCAL_SRC_FILES   += src/omx_video_encoder.cpp
 ifeq ($(TARGET_BOARD_PLATFORM),msm8974)
-LOCAL_SRC_FILES   += src/video_encoder_device_copper.cpp
+LOCAL_SRC_FILES   += src/video_encoder_device_msm8974.cpp
 else
 LOCAL_SRC_FILES   += src/video_encoder_device.cpp
 endif

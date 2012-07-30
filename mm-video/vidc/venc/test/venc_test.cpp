@@ -68,7 +68,7 @@ REFERENCES
 #include "venc_util.h"
 #include "extra_data_handler.h"
 #ifdef USE_ION
-#include <linux/msm_ion.h>
+#include <linux/ion.h>
 #endif
 
 //////////////////////////
@@ -363,7 +363,7 @@ void* PmemMalloc(OMX_QCOM_PLATFORM_PRIVATE_PMEM_INFO* pMem, int nSize)
       return NULL;
 
 #ifdef USE_ION
-  ion_data.ion_device_fd = open (PMEM_DEVICE,O_RDONLY/*|O_DSYNC*/);
+  ion_data.ion_device_fd = open (PMEM_DEVICE, O_RDONLY|O_DSYNC);
   if(ion_data.ion_device_fd < 0)
   {
       E("\nERROR: ION Device open() Failed");

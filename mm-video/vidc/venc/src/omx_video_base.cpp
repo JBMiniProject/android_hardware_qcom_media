@@ -3352,7 +3352,7 @@ OMX_ERRORTYPE  omx_video::empty_this_buffer_proxy(OMX_IN OMX_HANDLETYPE         
             buffer->nFilledLen);
     DEBUG_PRINT_LOW("memcpy() done in ETBProxy for i/p Heap UseBuf");
   }
-#ifdef _COPPER_
+#ifdef _MSM8974_
   if(dev_empty_buf(buffer, pmem_data_buf,nBufIndex,m_pInput_pmem[nBufIndex].fd) != true)
 #else
   if(dev_empty_buf(buffer, pmem_data_buf,0,0) != true)
@@ -4162,6 +4162,7 @@ OMX_ERRORTYPE omx_video::get_supported_profile_level(OMX_VIDEO_PARAM_PROFILELEVE
                     profileLevelType->eProfile,profileLevelType->eLevel);
   return eRet;
 }
+#endif
 
 #ifdef USE_ION
 int omx_video::alloc_map_ion_memory(int size,struct ion_allocation_data *alloc_data,
@@ -4176,7 +4177,7 @@ int omx_video::alloc_map_ion_memory(int size,struct ion_allocation_data *alloc_d
         if(flag == CACHED) {
              ion_dev_flags = O_RDONLY;
 	} else if(flag == UNCACHED) {
-             ion_dev_flags = O_RDONLY ;//| O_DSYNC;
+             ion_dev_flags = O_RDONLY | O_DSYNC;
         }
         ion_device_fd = open (MEM_DEVICE,ion_dev_flags);
         if(ion_device_fd < 0)
@@ -4227,7 +4228,7 @@ void omx_video::free_ion_memory(struct venc_ion *buf_ion_info)
      buf_ion_info->fd_ion_data.fd = -1;
 }
 #endif
-#endif
+
 #ifdef _ANDROID_ICS_
 void omx_video::omx_release_meta_buffer(OMX_BUFFERHEADERTYPE *buffer)
 {

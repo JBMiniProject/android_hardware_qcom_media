@@ -37,9 +37,12 @@ ifeq ($(TARGET_BOARD_PLATFORM),msm8974)
 libOmxVdec-def += -DMAX_RES_1080P
 libOmxVdec-def += -DMAX_RES_1080P_EBI
 libOmxVdec-def += -DPROCESS_EXTRADATA_IN_OUTPUT_PORT
-libOmxVdec-def += -D_COPPER_
+libOmxVdec-def += -D_MSM8974_
 endif
 ifeq ($(TARGET_BOARD_PLATFORM),msm7627a)
+libOmxVdec-def += -DMAX_RES_720P
+endif
+ifeq ($(TARGET_BOARD_PLATFORM),msm7x30)
 libOmxVdec-def += -DMAX_RES_720P
 endif
 
@@ -61,7 +64,7 @@ libmm-vdec-inc          += bionic/libstdc++/include
 libmm-vdec-inc          += $(LOCAL_PATH)/inc 
 libmm-vdec-inc          += $(OMX_VIDEO_PATH)/vidc/common/inc
 libmm-vdec-inc          += hardware/qcom/media/mm-core/inc
-#libmm-vdec-inc          += bionic/libc/kernel/common/
+#libmm-vdec-inc          += bionic/libc/kernel/common/linux
 #DRM include - Interface which loads the DRM library
 libmm-vdec-inc	        += $(OMX_VIDEO_PATH)/DivxDrmDecrypt/inc
 libmm-vdec-inc          += hardware/qcom/display/libgralloc

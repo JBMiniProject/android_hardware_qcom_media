@@ -2897,6 +2897,14 @@ OMX_ERRORTYPE omx_vdec::use_android_native_buffer(OMX_IN OMX_HANDLETYPE hComp, O
     m_use_android_native_buffers = OMX_TRUE;
     sp<android_native_buffer_t> nBuf = params->nativeBuffer;
     private_handle_t *handle = (private_handle_t *)nBuf->handle;
+
+    if ((OMX_U32)handle->size < drv_ctx.op_buf.buffer_size) {
+        DEBUG_PRINT_ERROR("Insufficient sized buffer given for playback,"
+                          " expected %u, got %lu",
+                          drv_ctx.op_buf.buffer_size, (OMX_U32)handle->size);
+        return OMX_ErrorBadParameter;
+    }
+
     if(OMX_CORE_OUTPUT_PORT_INDEX == params->nPortIndex) {  //android native buffers can be used only on Output port
         OMX_U8 *buffer = NULL;
         if(!secure_mode) {
@@ -3981,24 +3989,34 @@ OMX_ERRORTYPE  omx_vdec::use_output_buffer(
   if (eRet == OMX_ErrorNone) {
 #if defined(_ANDROID_HONEYCOMB_) || defined(_ANDROID_ICS_)
     if(m_enable_android_native_buffers) {
-      if(m_use_android_native_buffers) {
-           UseAndroidNativeBufferParams *params = (UseAndroidNativeBufferParams *)appData;
-           sp<android_native_buffer_t> nBuf = params->nativeBuffer;
-           handle = (private_handle_t *)nBuf->handle;
-           privateAppData = params->pAppPrivate;
+        if (m_use_android_native_buffers) {
+            UseAndroidNativeBufferParams *params = (UseAndroidNativeBufferParams *)appData;
+            sp<android_native_buffer_t> nBuf = params->nativeBuffer;
+            handle = (private_handle_t *)nBuf->handle;
+            privateAppData = params->pAppPrivate;
+        } else {
+            handle = (private_handle_t *)buff;
+            privateAppData = appData;
         }
-        else {
-           handle = (private_handle_t *)buff;
-           if(!secure_mode) {
-	       buff =  (OMX_U8*)mmap(0, handle->size,
-                             PROT_READ|PROT_WRITE, MAP_SHARED, handle->fd, 0);
-               if (buff == MAP_FAILED) {
-                   DEBUG_PRINT_ERROR("Failed to mmap pmem with fd = %d, size = %d", handle->fd, handle->size);
-                   return OMX_ErrorInsufficientResources;
-               }
-	    }
-           privateAppData = appData;
+
+        if ((OMX_U32)handle->size < drv_ctx.op_buf.buffer_size) {
+            DEBUG_PRINT_ERROR("Insufficient sized buffer given for playback,"
+                              " expected %u, got %lu",
+                              drv_ctx.op_buf.buffer_size, (OMX_U32)handle->size);
+            return OMX_ErrorBadParameter;
         }
+
+        if (!m_use_android_native_buffers) {
+            if (!secure_mode) {
+                buff =  (OMX_U8*)mmap(0, handle->size,
+                                      PROT_READ|PROT_WRITE, MAP_SHARED, handle->fd, 0);
+                if (buff == MAP_FAILED) {
+                  DEBUG_PRINT_ERROR("Failed to mmap pmem with fd = %d, size = %d", handle->fd, handle->size);
+                  return OMX_ErrorInsufficientResources;
+                }
+            }
+        }
+
 #if defined(_ANDROID_ICS_)
         native_buffer[i].nativehandle = handle;
 #endif
@@ -4128,8 +4146,7 @@ OMX_ERRORTYPE  omx_vdec::use_output_buffer(
      // found an empty buffer at i
      (*bufferHdr)->nAllocLen = drv_ctx.op_buf.buffer_size;
      if (m_enable_android_native_buffers) {
-       //LOG_ASSERT(handle == NULL);
-       ALOGE("setting pBuffer to private_handle_t %p", handle);
+       DEBUG_PRINT_LOW("setting pBuffer to private_handle_t %p", handle);
        (*bufferHdr)->pBuffer = (OMX_U8 *)handle;
      } else {
        (*bufferHdr)->pBuffer = buff;
@@ -6458,7 +6475,10 @@ OMX_ERRORTYPE omx_vdec::fill_buffer_done(OMX_HANDLETYPE hComp,
 #ifdef OUTPUT_BUFFER_LOG
   if (outputBufferFile1)
   {
-    fwrite (buffer->pBuffer,1,buffer->nFilledLen,
+    OMX_U32 index = buffer - m_out_mem_ptr;
+    OMX_U8* pBuffer = (OMX_U8 *)drv_ctx.ptr_outputbuffer[index].bufferaddr;
+
+    fwrite (pBuffer,1,buffer->nFilledLen,
                   outputBufferFile1);
   }
 #endif
@@ -6510,12 +6530,15 @@ OMX_ERRORTYPE omx_vdec::fill_buffer_done(OMX_HANDLETYPE hComp,
   if (outputExtradataFile)
   {
 
+    OMX_U32 index = buffer - m_out_mem_ptr;
+    OMX_U8* pBuffer = (OMX_U8 *)drv_ctx.ptr_outputbuffer[index].bufferaddr;
+
     OMX_OTHER_EXTRADATATYPE *p_extra = NULL;
     p_extra = (OMX_OTHER_EXTRADATATYPE *)
-           ((unsigned)(buffer->pBuffer + buffer->nOffset +
+           ((unsigned)(pBuffer + buffer->nOffset +
             buffer->nFilledLen + 3)&(~3));
     while(p_extra &&
-          (OMX_U8*)p_extra < (buffer->pBuffer + buffer->nAllocLen) )
+          (OMX_U8*)p_extra < (pBuffer + buffer->nAllocLen) )
     {
       DEBUG_PRINT_LOW("\nWRITING extradata, size=%d,type=%d",p_extra->nSize, p_extra->eType);
       fwrite (p_extra,1,p_extra->nSize,outputExtradataFile);
@@ -7412,7 +7435,7 @@ int omx_vdec::alloc_map_ion_memory(OMX_U32 buffer_size,
   {
      ion_dev_flag = O_RDONLY;
   } else {
-    ion_dev_flag = (O_RDONLY); /*| O_DSYNC); */ //BIG TBD
+    ion_dev_flag = (O_RDONLY | O_DSYNC);
   }
   fd = open (MEM_DEVICE, ion_dev_flag);
   if (fd < 0) {
@@ -8049,10 +8072,13 @@ void omx_vdec::handle_extradata(OMX_BUFFERHEADERTYPE *p_buf_hdr)
   OMX_S64 ts_in_sei = 0;
   OMX_U32 frame_rate = 0;
 
+  OMX_U32 index = p_buf_hdr - m_out_mem_ptr;
+  OMX_U8* pBuffer = (OMX_U8 *)drv_ctx.ptr_outputbuffer[index].bufferaddr;
+
   p_extra = (OMX_OTHER_EXTRADATATYPE *)
-           ((unsigned)(p_buf_hdr->pBuffer + p_buf_hdr->nOffset +
+           ((unsigned)(pBuffer + p_buf_hdr->nOffset +
             p_buf_hdr->nFilledLen + 3)&(~3));
-  if ((OMX_U8*)p_extra > (p_buf_hdr->pBuffer + p_buf_hdr->nAllocLen))
+  if ((OMX_U8*)p_extra > (pBuffer + p_buf_hdr->nAllocLen))
     p_extra = NULL;
   if (drv_ctx.extradata && (p_buf_hdr->nFlags & OMX_BUFFERFLAG_EXTRADATA))
   {
@@ -8066,7 +8092,7 @@ void omx_vdec::handle_extradata(OMX_BUFFERHEADERTYPE *p_buf_hdr)
         DEBUG_PRINT_ERROR(" \n Corrupt metadata Buffer size %d payload size %d",
                           p_extra->nSize, p_extra->nDataSize);
         p_extra = (OMX_OTHER_EXTRADATATYPE *) (((OMX_U8 *) p_extra) + p_extra->nSize);
-        if ((OMX_U8*)p_extra > (p_buf_hdr->pBuffer + p_buf_hdr->nAllocLen) ||
+        if ((OMX_U8*)p_extra > (pBuffer + p_buf_hdr->nAllocLen) ||
             p_extra->nDataSize == 0 || p_extra->nSize == 0)
           p_extra = NULL;
           continue;
@@ -8104,7 +8130,7 @@ void omx_vdec::handle_extradata(OMX_BUFFERHEADERTYPE *p_buf_hdr)
       }
       print_debug_extradata(p_extra);
       p_extra = (OMX_OTHER_EXTRADATATYPE *) (((OMX_U8 *) p_extra) + p_extra->nSize);
-      if ((OMX_U8*)p_extra > (p_buf_hdr->pBuffer + p_buf_hdr->nAllocLen) ||
+      if ((OMX_U8*)p_extra > (pBuffer + p_buf_hdr->nAllocLen) ||
           p_extra->nDataSize == 0 || p_extra->nSize == 0)
         p_extra = NULL;
     }
@@ -8113,7 +8139,7 @@ void omx_vdec::handle_extradata(OMX_BUFFERHEADERTYPE *p_buf_hdr)
       // Driver extradata is only exposed if MB map is requested by client,
       // otherwise can be overwritten by omx extradata.
       p_extra = (OMX_OTHER_EXTRADATATYPE *)
-               ((unsigned)(p_buf_hdr->pBuffer + p_buf_hdr->nOffset +
+               ((unsigned)(pBuffer + p_buf_hdr->nOffset +
                 p_buf_hdr->nFilledLen + 3)&(~3));
       p_buf_hdr->nFlags &= ~OMX_BUFFERFLAG_EXTRADATA;
     }
@@ -8139,7 +8165,7 @@ void omx_vdec::handle_extradata(OMX_BUFFERHEADERTYPE *p_buf_hdr)
 #endif
    if ((client_extradata & OMX_INTERLACE_EXTRADATA) && p_extra &&
       ((OMX_U8*)p_extra + OMX_INTERLACE_EXTRADATA_SIZE) <
-       (p_buf_hdr->pBuffer + p_buf_hdr->nAllocLen))
+       (pBuffer + p_buf_hdr->nAllocLen))
   {
     p_buf_hdr->nFlags |= OMX_BUFFERFLAG_EXTRADATA;
     append_interlace_extradata(p_extra,
@@ -8148,7 +8174,7 @@ void omx_vdec::handle_extradata(OMX_BUFFERHEADERTYPE *p_buf_hdr)
   }
   if (client_extradata & OMX_FRAMEINFO_EXTRADATA && p_extra &&
       ((OMX_U8*)p_extra + OMX_FRAMEINFO_EXTRADATA_SIZE) <
-       (p_buf_hdr->pBuffer + p_buf_hdr->nAllocLen))
+       (pBuffer + p_buf_hdr->nAllocLen))
   {
     p_buf_hdr->nFlags |= OMX_BUFFERFLAG_EXTRADATA;
     /* vui extra data (frame_rate) information */
@@ -8164,7 +8190,7 @@ void omx_vdec::handle_extradata(OMX_BUFFERHEADERTYPE *p_buf_hdr)
   if ((client_extradata & OMX_PORTDEF_EXTRADATA) &&
        p_extra != NULL &&
       ((OMX_U8*)p_extra + OMX_PORTDEF_EXTRADATA_SIZE) <
-       (p_buf_hdr->pBuffer + p_buf_hdr->nAllocLen))
+       (pBuffer + p_buf_hdr->nAllocLen))
   {
     p_buf_hdr->nFlags |= OMX_BUFFERFLAG_EXTRADATA;
     append_portdef_extradata(p_extra);
@@ -8173,7 +8199,7 @@ void omx_vdec::handle_extradata(OMX_BUFFERHEADERTYPE *p_buf_hdr)
   if (p_buf_hdr->nFlags & OMX_BUFFERFLAG_EXTRADATA)
     if (p_extra &&
       ((OMX_U8*)p_extra + OMX_FRAMEINFO_EXTRADATA_SIZE) <
-       (p_buf_hdr->pBuffer + p_buf_hdr->nAllocLen))
+        (pBuffer + p_buf_hdr->nAllocLen))
       append_terminator_extradata(p_extra);
     else
     {
